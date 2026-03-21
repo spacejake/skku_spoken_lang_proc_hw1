@@ -1,0 +1,279 @@
+from torch.utils.data import Dataset
+import torchaudio
+from pathlib import Path
+from typing import Tuple, Optional, Callable, Any
+from torch import Tensor
+import torch
+import os
+import tqdm
+import torch.nn.functional as F
+import numpy as np
+
+try:
+    import dataset
+except ImportError:
+    import sys
+    import git
+    git_root_dir = git.Repo(search_parent_directories=True).git.rev_parse("--show-toplevel")
+    sys.path.append(git_root_dir)
+
+
+#start for speechcommands 12 classes code
+SAMPLE_RATE = 16000
+FOLDER_IN_ARCHIVE = "SpeechCommands"
+URL = "speech_commands_v0.02"
+HASH_DIVIDER = "_nohash_"
+EXCEPT_FOLDER = "_background_noise_"
+
+UNKNOWN = [
+ 'backward',
+ 'bed',
+ 'bird', 
+ 'cat', 
+ 'dog', 
+ 'eight', 
+ 'five', 
+ 'follow', 
+ 'forward',
+ 'four', 
+ 'happy', 
+ 'house', 
+ 'learn', 
+ 'marvin', 
+ 'nine', 
+ 'one',  
+ 'seven', 
+ 'sheila', 
+ 'six', 
+ 'three', 
+ 'tree', 
+ 'two', 
+ 'visual', 
+ 'wow',
+ 'zero'
+]
+
+name2idx = {
+    'down':0,
+    'go':1,
+    'left':2,
+    'no':3,
+    'off':4,
+    'on':5,
+    'right':6,
+    'stop':7,
+    'up':8,
+    'yes':9,
+    '_silence_':10,
+    '_unknown_':11
+}
+
+idx2name = {}
+for name, idx in name2idx.items():
+    idx2name[idx] = name
+
+def _load_list(root, *filenames):
+    output = []
+    for filename in filenames:
+        filepath = os.path.join(root, filename)
+        with open(filepath) as fileobj:
+            output += [os.path.normpath(os.path.join(root, line.strip())) for line in fileobj]
+    return output
+
+
+def load_speechcommands_item(filepath: str, path: str) -> Tuple[Tensor, int, str, str, int]:
+    relpath = os.path.relpath(filepath, path)
+    label, filename = os.path.split(relpath)
+    # Besides the officially supported split method for datasets defined by "validation_list.txt"
+    # and "testing_list.txt" over "speech_commands_v0.0x.tar.gz" archives, an alternative split
+    # method referred to in paragraph 2-3 of Section 7.1, references 13 and 14 of the original
+    # paper, and the checksums file from the tensorflow_datasets package [1] is also supported.
+    # Some filenames in those "speech_commands_test_set_v0.0x.tar.gz" archives have the form
+    # "xxx.wav.wav", so file extensions twice needs to be stripped twice.
+    # [1] https://github.com/tensorflow/datasets/blob/master/tensorflow_datasets/url_checksums/speech_commands.txt
+    speaker, _ = os.path.splitext(filename)
+    speaker, _ = os.path.splitext(speaker)
+    
+    speaker_id, utterance_number = speaker.split(HASH_DIVIDER)
+    utterance_number = int(utterance_number)
+
+    # Load audio
+    waveform, sample_rate = torchaudio.load(filepath)
+    return waveform, sample_rate, label, speaker_id, utterance_number
+
+
+def caching_data(_walker, path, subset):
+    cache = []
+    for filepath in tqdm.tqdm(_walker, desc=f'Loading {subset} set'):
+        relpath = os.path.relpath(filepath, path)
+        label, filename = os.path.split(relpath)
+
+        original_label = label
+
+        if label in UNKNOWN: # if the label is not one of the 10 commands, map them to unknown
+            label = '_unknown_'
+
+        speaker, _ = os.path.splitext(filename)
+        speaker, _ = os.path.splitext(speaker)
+
+        # When loading test_set, there is a folder for _silence_
+        if label == '_silence_':
+            speaker_id = speaker.split(HASH_DIVIDER)
+            utterance_number = -1
+        else:
+            speaker_id, utterance_number = speaker.split(HASH_DIVIDER)
+            utterance_number = int(utterance_number)
+
+        # Load audio     
+        audio_samples, rate = torchaudio.load(filepath) # loading audio
+        # audio_sample (1, len)
+
+        if audio_samples.shape[1] != SAMPLE_RATE:
+            pad_length = SAMPLE_RATE-audio_samples.shape[1]
+            audio_samples = F.pad(audio_samples, (0,pad_length)) # pad the end of the audio until 1 second
+            # (1, 16000)
+        cache.append((audio_samples, rate, name2idx[label], speaker_id, utterance_number, original_label))
+    
+    # include silence
+    if subset=='training':
+        silence_clips = [
+            'dude_miaowing.wav',
+            'white_noise.wav',
+            'exercise_bike.wav',
+            'doing_the_dishes.wav',
+            'pink_noise.wav'
+        ]
+    elif subset=='validation':
+        silence_clips = [
+            'running_tap.wav'
+        ]
+    else:
+        silence_clips = []    
+        
+    for i in silence_clips: 
+        audio_samples, rate = torchaudio.load(os.path.join(path, '_background_noise_', i))
+        for start in range(0,
+                           audio_samples.shape[1] - SAMPLE_RATE,
+                           SAMPLE_RATE//2):
+            audio_segment = audio_samples[0, start:start + SAMPLE_RATE]
+            cache.append((audio_segment.unsqueeze(0), rate, name2idx['_silence_'], '00000000', -1, '_silence_'))        
+        
+    return cache
+
+
+def collate_speechcommands_batch(batch):
+    """Pad waveforms and stack labels for SPEECHCOMMANDS_12C samples.
+
+    Kept at module scope so DataLoader workers using spawn (e.g. macOS + Jupyter)
+    can pickle ``collate_fn``.
+    """
+    waveforms = []
+    labels = []
+    for sample in batch:
+        waveforms.append(sample[0].squeeze(0))
+        labels.append(sample[2])
+    waveform_padded = torch.nn.utils.rnn.pad_sequence(waveforms, batch_first=True)
+    return {"waveforms": waveform_padded, "labels": torch.tensor(labels)}
+
+
+class SPEECHCOMMANDS_12C(Dataset):
+    """Create a Dataset for Speech Commands.
+    Args:
+        root (str or Path): Path to the directory where the dataset is found or downloaded.
+        url (str, optional): The URL to download the dataset from,
+            or the type of the dataset to dowload.
+            Allowed type values are ``"speech_commands_v0.01"`` and ``"speech_commands_v0.02"``
+            (default: ``"speech_commands_v0.02"``)
+        folder_in_archive (str, optional):
+            The top-level directory of the dataset. (default: ``"SpeechCommands"``)
+        download (bool, optional):
+            Whether to download the dataset if it is not found at root path. (default: ``False``).
+        subset (str or None, optional):
+            Select a subset of the dataset [None, "training", "validation", "testing"]. None means
+            the whole dataset. "validation" and "testing" are defined in "validation_list.txt" and
+            "testing_list.txt", respectively, and "training" is the rest. Details for the files
+            "validation_list.txt" and "testing_list.txt" are explained in the README of the dataset
+            and in the introduction of Section 7 of the original paper and its reference 12. The
+            original paper can be found `here <https://arxiv.org/pdf/1804.03209.pdf>`_. (Default: ``None``)
+        transform (callable, optional): A function/transform that takes in an a torch Tensor of audio and
+            returns a transformed version.
+        target_transform (callable, optional): A function/transform that takes in the target (sample_rate,
+            label, speaker_id, utterance_number, original_label) and transforms it
+    """
+
+    def __init__(self,
+                 root: str,
+                 url: str,
+                 folder_in_archive: str,
+                 download: bool,
+                 subset: str,
+                 transform: Optional[Callable[[Tensor, int], Any]] = None,
+                 target_transform: Optional[Callable[[int, str, str, int, str], Any]] = None,
+                 ):
+
+        assert subset is None or subset in ["training", "validation", "testing"], (
+            "When `subset` not None, it must take a value from "
+            + "{'training', 'validation', 'testing'}."
+        )
+
+        url = "speech_commands_v0.02"
+
+        # Get string representation of 'root' in case Path object is passed
+        root = os.fspath(root)
+
+        full_basename = os.path.basename(url)
+        basename = full_basename.rsplit(".", 2)[0]
+        folder_in_archive = os.path.join(folder_in_archive, basename)
+
+        self._path = os.path.join(root, folder_in_archive, full_basename)
+
+        torchaudio.datasets.SPEECHCOMMANDS(root, url, folder_in_archive, download, subset)
+
+        if subset == "validation":
+            self._walker = _load_list(self._path, "validation_list.txt")
+            self._data = caching_data(self._walker, self._path, subset)            
+        elif subset == "testing":
+            self._walker = _load_list(self._path, "testing_list.txt")
+            self._data = caching_data(self._walker, self._path, subset)
+        elif subset == "training":
+            excludes = set(_load_list(self._path, "validation_list.txt", "testing_list.txt"))
+            walker = sorted(str(p) for p in Path(self._path).glob('*/*.wav'))
+            self._walker = [
+                w for w in walker
+                if HASH_DIVIDER in w
+                and EXCEPT_FOLDER not in w
+                and os.path.normpath(w) not in excludes
+            ]
+            self._data = caching_data(self._walker, self._path, subset)
+
+        else:
+            walker = sorted(str(p) for p in Path(self._path).glob('*/*.wav'))
+            self._walker = [w for w in walker if HASH_DIVIDER in w and EXCEPT_FOLDER not in w]
+
+        self.transform = transform
+        self.target_transform = target_transform
+
+    def __getitem__(self, n: int) -> Tuple[Any, Any, Any, Any, Any, Any]:
+        """Load the n-th sample from the dataset.
+        Args:
+            n (int): The index of the sample to be loaded
+        Returns:
+            (Any, Any): (transformed) waveform and corresponding (transformed) label
+        """
+        data = self._data[n]
+        waveform, rate, label, speaker_id, utterance_number, original_label = data
+        # single channel waveform
+        if waveform.ndim > 1:
+            waveform = torch.mean(waveform, dim=tuple(range(waveform.ndim - 1)))
+
+
+        if self.transform is not None:
+            waveform, _ = self.transform(waveform, rate)
+
+        if self.target_transform is not None:
+            label = self.target_transform(*label)
+
+        return waveform, rate, label, speaker_id, utterance_number, original_label
+
+    def __len__(self) -> int:
+        return len(self._data)

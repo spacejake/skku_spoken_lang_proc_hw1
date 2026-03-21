@@ -1,0 +1,23 @@
+soundfile
+numpy
+pandas
+matplotlib
+seaborn
+# brew install ffmpeg
+ffmpeg
+torch
+torchaudio
+einops
+torchcodec
+pytorch_lightning
+tensorboard
+gitpython
+jupyter
+scikit-learn
+scipy
+librosa
+nnAudio
+tqdm
+rich
+audiomentations
+pyroomacoustics
