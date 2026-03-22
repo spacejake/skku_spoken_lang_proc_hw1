@@ -8,7 +8,8 @@ Train a **lightweight keyword spotting** model on the **Google Speech Commands D
 
 - **Audio:** 16 kHz sampling rate, 1 s clips.
 - **Classes (12):** ten commands — `yes`, `no`, `up`, `down`, `left`, `right`, `on`, `off`, `stop`, `go` — plus **`silence`** and **`unknown`**.
-- **Split (approx. 8 : 1 : 1):** train **36,923** · validation **4,445** · test **4,890**.
+- **Split (approx. 8 : 1 : 1):** train **36,923** · validation **4,445** · test **4,890**.  
+    - **Actual Split:** train **84,843** · validation **9,981** · test **11,005**.
 - **Input features:** **log-mel spectrogram** with a **40 ms** window, **20 ms** hop (overlap), and **80** mel bins (see `model/encoder.py`).
 
 ### Model and training requirements
