@@ -13,7 +13,6 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer
 
-
 from dataset.speechcommands import SPEECHCOMMANDS_12C, collate_speechcommands_batch  # 12 classes KWS
 from dataset.augmentations import TimeMask
 from model.speechcommand import ConvNextASR
@@ -47,68 +46,30 @@ if __name__ == "__main__":
     download_option = False
     output_dim = 12
 
-    trainset = SPEECHCOMMANDS_12C(
+    testset = SPEECHCOMMANDS_12C(
         root=data_root,
         url='speech_commands_v0.02',
         folder_in_archive='./data/SpeechCommands',
         download= download_option,
-        subset='training',
-        # subset='validation',
-        transform=TimeMask(p=0.5)
+        subset='testing',
     )
 
-    validset = SPEECHCOMMANDS_12C(
-        root=data_root,
-        url='speech_commands_v0.02',
-        folder_in_archive='./data/SpeechCommands',
-        download= download_option,
-        subset='validation',
-    )
-
-    #data rebalancing
-    class_weights = [1,1,1,1,1,1,1,1,1,1,4.6,1/17]
-    sample_weights = [0] * len(trainset)
-    for idx, (waveform, rate, label, speaker_id, utterance_number, original_label) in enumerate(trainset):
-        class_weight = class_weights[label]
-        sample_weights[idx] = class_weight
-    sampler = WeightedRandomSampler(
-        sample_weights,
-        num_samples=len(sample_weights),
-        replacement=True
-    )
-
-    trainloader = DataLoader(
-        trainset,
+    testloader = DataLoader(
+        testset,
         collate_fn=collate_speechcommands_batch,
         batch_size=batch_size,
-        sampler=sampler,
+        num_workers=1,
     )
 
-    validloader = DataLoader(
-        validset,
-        collate_fn=collate_speechcommands_batch,
-        batch_size=batch_size,
-    )
-
-    model = ConvNextASR(max_epochs=max_epochs)
+    model = ConvNextASR.load_from_checkpoint('lightning_logs/speech_commands/v1/checkpoints/best-val-acc-epochepoch=173.ckpt')
     model = model.to(device)
+
 
     trainer = Trainer(
         max_epochs=max_epochs,
-        check_val_every_n_epoch=check_val_every_n_epoch,
-        num_sanity_val_steps=num_sanity_val_steps,
-        logger=TensorBoardLogger(save_dir="lightning_logs", name="speech_commands"),
-        callbacks=[
-            LearningRateMonitor(logging_interval="step"),
-            ModelCheckpoint(
-                monitor="Validation/acc",
-                mode="max",
-                save_top_k=1,
-                filename="best-val-acc-epoch{epoch:03d}",
-                save_weights_only=False,
-                verbose=True,
-            ),
-        ],
+        logger=TensorBoardLogger(save_dir="lightning_logs", name="eval_speech_commands"),
+        check_val_every_n_epoch= check_val_every_n_epoch,
+        num_sanity_val_steps=num_sanity_val_steps
     )
 
-    trainer.fit(model, trainloader, validloader)
+    trainer.test(model, testloader)
