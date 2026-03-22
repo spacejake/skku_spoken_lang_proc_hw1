@@ -34,3 +34,15 @@ __pycache__/
 *.pyzwz
 *.pyzwzw
 
+# Ignore LaTeX build artifacts
+doc/*.aux
+doc/*.log
+doc/*.out
+doc/*.pdf
+doc/*.synctex.gz
+doc/*.toc
+doc/*.fls
+doc/*.fdb_latexmk
+doc/*.fls.lock
+doc/*.fls.old
+doc/*.fls.old.lock

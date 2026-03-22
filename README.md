@@ -77,11 +77,12 @@ Opens logs from `lightning_logs/` (train/val metrics, LR, gradient norm, etc.).
 
 ## Evaluation (test set)
 
-1. In `eval.py`, set `ConvNextASR.load_from_checkpoint(...)` to your **saved checkpoint** path (under `lightning_logs/speech_commands/version_*/checkpoints/`; filename pattern `best-val-acc-epoch*.ckpt`).
-2. Run:
+Pass your saved checkpoint (under `lightning_logs/speech_commands/version_*/checkpoints/`, often `best-val-acc-epoch*.ckpt`):
 
 ```bash
-python eval.py
+python eval.py --checkpoint lightning_logs/speech_commands/version_0/checkpoints/best-val-acc-epoch=173.ckpt
+# short form:
+python eval.py -c path/to/best-val-acc-epoch*.ckpt
 ```
 
 PyTorch Lightning will print **test** metrics to the terminal.

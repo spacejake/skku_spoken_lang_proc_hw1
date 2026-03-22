@@ -1,5 +1,5 @@
-
 # import related libraries
+import argparse
 import warnings
 
 import torch
@@ -26,6 +26,17 @@ warnings.filterwarnings(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Evaluate ConvNextASR on the Speech Commands test split.")
+    parser.add_argument(
+        "--checkpoint",
+        "-c",
+        type=str,
+        required=False,
+        default="./lightning_logs/speech_commands/v1/checkpoints/best-val-acc-epochepoch=173.ckpt",
+        help="Path to a Lightning checkpoint (.ckpt), e.g. lightning_logs/speech_commands/version_0/checkpoints/best-val-acc-epoch*.ckpt",
+    )
+    args = parser.parse_args()
+
     # Get available devices
     if torch.cuda.is_available():
         device = 'cuda:0'
@@ -61,7 +72,7 @@ if __name__ == "__main__":
         num_workers=1,
     )
 
-    model = ConvNextASR.load_from_checkpoint('lightning_logs/speech_commands/v1/checkpoints/best-val-acc-epochepoch=173.ckpt')
+    model = ConvNextASR.load_from_checkpoint(args.checkpoint)
     model = model.to(device)
 
 
