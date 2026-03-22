@@ -128,7 +128,7 @@ def barplot(result_dict, title, figsize=(4,12), minor_interval=0.2, log=False):
     ax.set_title(title)
     ax.grid(axis='x')
     ax.grid(visible=True, which='minor', linestyle='--')
-    fig.savefig(f'{title}.png', bbox_inches='tight')
+    # fig.savefig(f'{title}.png', bbox_inches='tight')
     fig.tight_layout() # prevent edge from missing
     return fig
 
