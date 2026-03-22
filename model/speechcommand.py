@@ -26,8 +26,8 @@ import seaborn as sns
 
 class SpeechCommand(LightningModule):
     # Log mel + waveform every N batches within each val/test dataloader pass (0 disables).
-    eval_log_spec_every_n_batches: int = 1000
-    train_log_spec_every_n_batches: int = 10000
+    train_log_spec_every_n_batches: int = 1000
+    eval_log_spec_every_n_batches: int = 10
 
     def configure_optimizers(self):
         model_param = []
@@ -69,13 +69,13 @@ class SpeechCommand(LightningModule):
                 torch.clamp_(self.mel_layer.mel_basis, 0, 1)
 
     @rank_zero_only
-    def log_spec_audio(self, name, spec, waveforms, labels, step, preds=None,):
+    def log_spec_audio(self, name, spec, waveforms, labels, step=None, preds=None,):
         writer = self.logger.experiment
-        step = self.global_step  # or self.current_epoch
+        step = step or self.global_step
         # spec: e.g. [B, C, T] — pick one example, normalize to [0, 1] for display
         log_mel_spectrogram(
             self.logger.experiment,
-            name=name,
+            name=f"{name}/spec",
             log_mel=spec[0],
             label=idx2name[int(labels[0].item())],
             predicted=idx2name[int(preds[0].item())] if preds is not None else None,
@@ -86,8 +86,7 @@ class SpeechCommand(LightningModule):
         w = waveforms[0].detach().cpu()#.clamp(-1, 1)
         if w.dim() == 1:
             w = w.unsqueeze(0)
-        prefix = name.rsplit("/", 1)[0] if "/" in name else name
-        writer.add_audio(f"{prefix}/waveform", w, step, sample_rate=16000)
+        writer.add_audio(f"{name}/waveform", w, step, sample_rate=16000)
         return
 
     def training_step(self, batch, batch_idx):
@@ -123,13 +122,14 @@ class SpeechCommand(LightningModule):
 
         n = self.eval_log_spec_every_n_batches
         if n > 0 and batch_idx % n == 0:
+            step = self.global_step + batch_idx
             self.log_spec_audio(
                 name="train/spec", 
                 spec=spec, 
                 waveforms=batch['waveforms'].detach().cpu(), 
                 labels=batch['labels'].detach().cpu(),
                 preds=preds.detach().cpu(),
-                step=self.global_step
+                step=step
             )
         return loss
 
@@ -148,22 +148,24 @@ class SpeechCommand(LightningModule):
         outputs, spec = self(batch['waveforms'])
         loss = self.criterion(outputs, batch['labels'].long())        
 
-        self.log('Test/Loss', loss, on_step=False, on_epoch=True)          
-        
+        self.log('test/Loss', loss, on_step=False, on_epoch=True)          
+
         if not hasattr(self, '_test_outputs'):
             self._test_outputs = []
         self._test_outputs.append((outputs.detach(), batch['labels'].detach()))
-    
+
         preds = outputs.argmax(-1)
         n = self.eval_log_spec_every_n_batches
         if n > 0 and batch_idx % n == 0:
+            # build a batch index including global step
+            step = self.global_step + batch_idx
             self.log_spec_audio(
-                name="test/spec",
+                name="test",
                 spec=spec,
                 waveforms=batch['waveforms'].detach().cpu(),
                 labels=batch['labels'].detach().cpu(),
                 preds=preds.detach().cpu(),
-                step=self.global_step,
+                step=step,
             )
         return loss
 
@@ -213,9 +215,13 @@ class SpeechCommand(LightningModule):
 
 
 class ConvNextASR(SpeechCommand):
-    def __init__(self, max_epochs: int = 200, eval_log_spec_every_n_batches: int = 1000):
+    def __init__(
+        self, max_epochs: int = 200,
+        train_log_spec_every_n_batches: int = 1000,
+        eval_log_spec_every_n_batches: int = 1):
         super().__init__()
         self.max_epochs = max_epochs
+        self.train_log_spec_every_n_batches = train_log_spec_every_n_batches
         self.eval_log_spec_every_n_batches = eval_log_spec_every_n_batches
         self.model = SpeechCommandClassifier(
             num_classes=12,
