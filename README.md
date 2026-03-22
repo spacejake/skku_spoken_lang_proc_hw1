@@ -47,10 +47,9 @@ Run scripts with the venv active, or prefix with `uv run` (e.g. `uv run python t
 
 This codebase follows the **torchaudio** Speech Commands layout under the project root:
 
-- Set `data_root = './'` in `train.py` / `eval.py` (default).
-- Expected tree: `./data/SpeechCommands/` with the standard v0.02 folder structure.
+- For **training** or **eval**, pass **`--data-root ...`** (default **`.`**); expected tree under that root: **`./data/SpeechCommands/`** (standard v0.02 layout).
 
-For a **first-time download**, set `download_option = True` in `train.py` (and `eval.py` if needed) so torchaudio can fetch the dataset; otherwise place an existing copy under `./data/SpeechCommands/` and keep `download_option = False`.
+For a **first-time download**, use **`--download`** on `train.py` and/or `eval.py` so torchaudio can fetch the dataset; otherwise place data under **`./data/SpeechCommands/`** and omit **`--download`**.
 
 ---
 
@@ -58,9 +57,26 @@ For a **first-time download**, set `download_option = True` in `train.py` (and `
 
 ```bash
 python train.py
+# optional: download dataset if missing; custom root (still uses <data-root>/data/SpeechCommands/...)
+python train.py --download --data-root ./data
+python train.py --data-root /path/to/project_or_data_parent
 ```
 
-Checkpoints and TensorBoard runs are written under `lightning_logs/` (run name `speech_commands`). The **best validation accuracy** checkpoint is saved by `ModelCheckpoint`.
+`train.py` arguments:
+
+- **`--data-root`** (default: **`./data`**) — passed as `root` to the dataset loader; layout stays **`./data/SpeechCommands/`**.
+- **`--download`** (default: **off**) — set flag to let torchaudio fetch Speech Commands when needed.
+
+Checkpoints and TensorBoard logs share the same run root:
+
+- **Root:** `lightning_logs/speech_commands/`
+- **Per training run:** Lightning creates a version folder `version_0`, `version_1`, … (incrementing each time you train from a clean or new run).
+- **Checkpoints:** `lightning_logs/speech_commands/version_<N>/checkpoints/`
+- **Best val-acc file:** `ModelCheckpoint` uses the pattern `best-val-acc-epoch…` (see `train.py`; exact suffix may include the epoch index Lightning adds).
+
+Example (your machine may use a different `version_*`):
+
+`lightning_logs/speech_commands/v1/checkpoints/best-val-acc-epochepoch=173.ckpt`
 
 ---
 
@@ -77,13 +93,22 @@ Opens logs from `lightning_logs/` (train/val metrics, LR, gradient norm, etc.).
 
 ## Evaluation (test set)
 
-Pass your saved checkpoint (under `lightning_logs/speech_commands/version_*/checkpoints/`, often `best-val-acc-epoch*.ckpt`):
+`eval.py` accepts **`--checkpoint`** / **`-c`**. If you omit it, the **default** checkpoint path is:
+
+`./lightning_logs/speech_commands/v1/checkpoints/best-val-acc-epochepoch=173.ckpt`
+
+(point this default at whatever `version_*/checkpoints/*.ckpt` you actually use after training).
 
 ```bash
-python eval.py --checkpoint lightning_logs/speech_commands/version_0/checkpoints/best-val-acc-epoch=173.ckpt
-# short form:
-python eval.py -c path/to/best-val-acc-epoch*.ckpt
+# default checkpoint path (see above); default data root ./data
+python eval.py
+
+# override checkpoint and/or data location / download
+python eval.py -c path/to/your.ckpt --data-root /path/to/project_or_data_parent
+python eval.py --download   # fetch Speech Commands if missing under <data-root>/data/SpeechCommands/
 ```
+
+`eval.py` also accepts **`--data-root`** (default **`./data`**) and **`--download`** (default **off**), same semantics as `train.py`.
 
 PyTorch Lightning will print **test** metrics to the terminal.
 
@@ -97,17 +122,10 @@ Results below are from one completed run (`trainer.test` on the test loader), ma
 |--------|--------|
 | test/Loss | 0.1932 |
 | test/acc | 0.9697 |
-| test/macro_f1 | 0.9527 |
-| test/micro_f1 | 0.9697 |
-| test/weighted_f1 | 0.9696 |
-
 Full-precision values from that run:
 
 - `test/Loss`: 0.19318167865276337  
-- `test/acc`: 0.969650149345398  
-- `test/macro_f1`: 0.952729344367981  
-- `test/micro_f1`: 0.969650149345398  
-- `test/weighted_f1`: 0.969610869884491  
+- `test/acc`: 0.969650149345398
 
 ---
 

@@ -35,7 +35,21 @@ if __name__ == "__main__":
         default="./lightning_logs/speech_commands/v1/checkpoints/best-val-acc-epochepoch=173.ckpt",
         help="Path to a Lightning checkpoint (.ckpt), e.g. lightning_logs/speech_commands/version_0/checkpoints/best-val-acc-epoch*.ckpt",
     )
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        default="./data",
+        help="Root directory for the dataset (data under <data-root>/data/SpeechCommands/...). Default: './data'.",
+    )
+    parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Download Speech Commands v0.02 via torchaudio if files are missing (default: do not download).",
+    )
     args = parser.parse_args()
+    data_root = args.data_root
+    download_option = args.download
+    folder_in_archive = "./SpeechCommands"
 
     # Get available devices
     if torch.cuda.is_available():
@@ -53,15 +67,13 @@ if __name__ == "__main__":
     max_epochs = 200
     check_val_every_n_epoch = 2
     num_sanity_val_steps = 5
-    data_root = './' # Download the data here
-    download_option = False
     output_dim = 12
 
     testset = SPEECHCOMMANDS_12C(
         root=data_root,
         url='speech_commands_v0.02',
-        folder_in_archive='./data/SpeechCommands',
-        download= download_option,
+        folder_in_archive=folder_in_archive,
+        download=download_option,
         subset='testing',
     )
 
